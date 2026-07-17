@@ -1,7 +1,7 @@
 """Command documentation loader for Lumerical MCP Server.
 
 Loads and queries Lumerical scripting command documentation from:
-1. The bundled docs.json (from Lumerical installation)
+1. The bundled docs.json (from Lumerical installation, v261: 665 commands)
 2. The lumerical-docs Markdown repository (if available)
 """
 
@@ -75,7 +75,8 @@ class CommandDocs:
         """Get detailed help for a command.
 
         Returns:
-            dict with 'name', 'link', 'text' (from docs.json), and 'markdown' (from .md file)
+            dict with 'name', 'link', 'text' (from docs.json),
+            and 'markdown' (from .md file)
         """
         self.load()
         cmd = command.lower().strip()
@@ -84,8 +85,10 @@ class CommandDocs:
         if not info:
             return {
                 "success": False,
-                "error": f"No documentation found for command '{command}'. "
-                f"Use lumerical_list_commands to see available commands.",
+                "error": (
+                    f"No documentation found for command '{command}'. "
+                    f"Use lumerical_list_commands to see available commands."
+                ),
             }
 
         result = {
@@ -150,79 +153,128 @@ class CommandDocs:
         }
 
     def get_commands_by_category(self) -> dict:
-        """Get commands organized by functional category."""
+        """Get commands organized by functional category.
+
+        v261 categories include new RCWA, DGTD, device physics,
+        and inverse design command groupings.
+        """
         self.load()
 
         categories = {
             "solver": {
                 "name": "Solvers & Simulation Setup",
-                "keywords": ["solver", "fdtd", "fde", "eme", "varfdtd", "analysis", "mesh",
-                           "boundary", "pml", "periodic", "simulation region"],
+                "keywords": [
+                    "solver", "fdtd", "fde", "eme", "varfdtd", "dgt",
+                    "rcwa", "analysis", "mesh", "boundary", "pml",
+                    "periodic", "simulation region", "feem",
+                ],
                 "commands": [],
             },
             "geometry": {
                 "name": "Geometry & Structures",
-                "keywords": ["rect", "sphere", "circle", "ring", "polygon", "waveguide",
-                           "plane", "triangle", "pyramid", "surface", "planarsolid",
-                           "structure", "group", "layer", "path", "import", "stl", "gds"],
+                "keywords": [
+                    "rect", "sphere", "circle", "ring", "polygon",
+                    "waveguide", "plane", "triangle", "pyramid",
+                    "surface", "planarsolid", "structure", "group",
+                    "layer", "path", "import", "stl", "gds",
+                    "field region", "assembly group",
+                ],
                 "commands": [],
             },
             "source": {
                 "name": "Sources & Excitation",
-                "keywords": ["source", "dipole", "mode", "gaussian", "beam", "tfsf",
-                           "importedsource", "global source"],
+                "keywords": [
+                    "source", "dipole", "mode", "gaussian", "beam",
+                    "tfsf", "importedsource", "global source",
+                    "delta charge", "electrical contact",
+                ],
                 "commands": [],
             },
             "monitor": {
                 "name": "Monitors & Data Collection",
-                "keywords": ["monitor", "power", "profile", "index", "field", "time",
-                           "movie", "frequency", "transmission", "absorption",
-                           "farfield", "mode expansion", "port"],
+                "keywords": [
+                    "monitor", "power", "profile", "index", "field",
+                    "time", "movie", "frequency", "transmission",
+                    "absorption", "farfield", "mode expansion", "port",
+                    "rcwa field", "dft", "charge", "heat flux",
+                    "temperature", "jflux", "bandstructure",
+                ],
                 "commands": [],
             },
             "material": {
                 "name": "Materials",
-                "keywords": ["material", "index", "nk", "conductivity", "permittivity",
-                           "model", "sampled", "property"],
+                "keywords": [
+                    "material", "index", "nk", "conductivity",
+                    "permittivity", "model", "sampled", "property",
+                    "ct material", "ht material", "em material",
+                ],
                 "commands": [],
             },
             "simulation": {
                 "name": "Simulation Control",
-                "keywords": ["run", "simulation", "sweep", "optimize", "parameter",
-                           "job", "parallel", "convergence"],
+                "keywords": [
+                    "run", "simulation", "sweep", "optimize",
+                    "parameter", "job", "parallel", "convergence",
+                    "resource",
+                ],
                 "commands": [],
             },
             "results": {
                 "name": "Results & Post-Processing",
-                "keywords": ["result", "data", "get", "export", "visualize", "plot",
-                           "field", "transmission", "farfield", "mode", "sweep result"],
+                "keywords": [
+                    "result", "data", "get", "export", "visualize",
+                    "plot", "field", "transmission", "farfield",
+                    "mode", "sweep result", "dataset",
+                ],
                 "commands": [],
             },
             "utility": {
                 "name": "Utility & Math",
-                "keywords": ["select", "set", "delete", "copy", "move", "rotate",
-                           "group", "scope", "save", "load", "clear", "matlab",
-                           "system", "file", "cd", "pwd", "ls", "abs", "sin", "cos",
-                           "log", "exp", "fft", "matrix", "interp", "integrate"],
+                "keywords": [
+                    "select", "set", "delete", "copy", "move",
+                    "rotate", "group", "scope", "save", "load",
+                    "clear", "matlab", "system", "file", "cd",
+                    "pwd", "ls", "abs", "sin", "cos", "log",
+                    "exp", "fft", "matrix", "interp", "integrate",
+                ],
                 "commands": [],
             },
             "scripting": {
                 "name": "Scripting Language",
-                "keywords": ["eval", "script", "function", "variable", "if", "for",
-                           "while", "break", "return", "struct", "cell", "matrix",
-                           "string", "format", "sprintf", "print"],
+                "keywords": [
+                    "eval", "script", "function", "variable",
+                    "if", "for", "while", "break", "return",
+                    "struct", "cell", "matrix", "string",
+                    "format", "sprintf", "print",
+                ],
                 "commands": [],
             },
             "interconnect": {
                 "name": "INTERCONNECT Specific",
-                "keywords": ["element", "netlist", "schematic", "port", "analyzer",
-                           "transmission line", "optical network"],
+                "keywords": [
+                    "element", "netlist", "schematic", "port",
+                    "analyzer", "transmission line",
+                    "optical network",
+                ],
                 "commands": [],
             },
             "device": {
                 "name": "DEVICE Specific",
-                "keywords": ["charge", "heat", "thermal", "electrical", "doping",
-                           "contact", "voltage", "current", "semiconductor"],
+                "keywords": [
+                    "charge", "heat", "thermal", "electrical",
+                    "doping", "contact", "voltage", "current",
+                    "semiconductor", "diffusion", "generation",
+                    "recombination", "implant", "bulk gen",
+                ],
+                "commands": [],
+            },
+            "inverse_design": {
+                "name": "Inverse Design & Optimization",
+                "keywords": [
+                    "optimization", "adjoint", "gradient",
+                    "figure of merit", "topology", "fabrication",
+                    "inverse design",
+                ],
                 "commands": [],
             },
         }
@@ -234,7 +286,9 @@ class CommandDocs:
             best_score = 0
 
             for cat_key, cat_info in categories.items():
-                score = sum(1 for kw in cat_info["keywords"] if kw in text)
+                score = sum(
+                    1 for kw in cat_info["keywords"] if kw in text
+                )
                 if score > best_score:
                     best_score = score
                     best_category = cat_key

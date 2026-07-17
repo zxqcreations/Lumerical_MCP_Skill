@@ -207,7 +207,9 @@ def register_optimization_tools(mcp: FastMCP) -> None:
         """Run simulation jobs in parallel.
 
         Uses Lumerical's built-in parallel processing for sweeps and
-        independent simulations.
+        independent simulations via the job manager.
+
+        For MPI-based parallel execution, use lumerical_mpi_run_sweep.
 
         Args:
             session_id: The session ID from lumerical_open

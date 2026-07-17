@@ -121,4 +121,133 @@ def register_simulation_tools(mcp: FastMCP) -> None:
         session_mgr = SessionManager()
         return session_mgr.eval(session_id, f'cd("{path}");')
 
+    @mcp.tool()
+    def lumerical_stop(session_id: str) -> dict:
+        """Gracefully stop a running simulation.
+
+        Stops the current simulation without closing the project.
+        Partial results up to the stop point are preserved.
+
+        Args:
+            session_id: The session ID from lumerical_open
+
+        Returns:
+            dict with status
+        """
+        session_mgr = SessionManager()
+        return session_mgr.eval(session_id, "stop;")
+
+    @mcp.tool()
+    def lumerical_get_status(session_id: str) -> dict:
+        """Get the current simulation running status.
+
+        Returns progress percentage, time elapsed, and
+        estimated remaining time for an active simulation.
+
+        Args:
+            session_id: The session ID from lumerical_open
+
+        Returns:
+            dict with simulation status
+        """
+        session_mgr = SessionManager()
+        code = "temp_status = getstatus;"
+        eval_result = session_mgr.eval(session_id, code)
+        if not eval_result.get("success"):
+            return eval_result
+        result = session_mgr.get_var(session_id, "temp_status")
+        session_mgr.eval(session_id, "clear(temp_status);")
+        return result
+
+    @mcp.tool()
+    def lumerical_get_resource(session_id: str) -> dict:
+        """Get compute resource configuration (threads, processes, GPU).
+
+        Args:
+            session_id: The session ID from lumerical_open
+
+        Returns:
+            dict with resource configuration
+        """
+        session_mgr = SessionManager()
+        code = "temp_res = getresource;"
+        eval_result = session_mgr.eval(session_id, code)
+        if not eval_result.get("success"):
+            return eval_result
+        result = session_mgr.get_var(session_id, "temp_res")
+        session_mgr.eval(session_id, "clear(temp_res);")
+        return result
+
+    @mcp.tool()
+    def lumerical_set_resource(
+        session_id: str,
+        properties: str = "{}",
+    ) -> dict:
+        """Set compute resource configuration.
+
+        Configure threads, parallel processes, and solver-specific
+        resource options.
+
+        Args:
+            session_id: The session ID from lumerical_open
+            properties: JSON object of resource settings.
+                E.g., '{"number of threads": 8, "FDTD": {"use GPU": 1}}'
+
+        Returns:
+            dict with status
+        """
+        import json
+
+        try:
+            props = json.loads(properties)
+        except json.JSONDecodeError:
+            return {"success": False, "error": f"Invalid JSON: {properties}"}
+
+        session_mgr = SessionManager()
+        script_lines = []
+        for key, value in props.items():
+            key = key.replace("_", " ")
+            if isinstance(value, dict):
+                for sub_key, sub_value in value.items():
+                    sub_key = sub_key.replace("_", " ")
+                    if isinstance(sub_value, str):
+                        script_lines.append(
+                            f'setresource("{key}", "{sub_key}", "{sub_value}");'
+                        )
+                    else:
+                        script_lines.append(
+                            f'setresource("{key}", "{sub_key}", {sub_value});'
+                        )
+            else:
+                if isinstance(value, str):
+                    script_lines.append(
+                        f'setresource("{key}", "{value}");'
+                    )
+                else:
+                    script_lines.append(
+                        f'setresource("{key}", {value});'
+                    )
+
+        return session_mgr.eval(session_id, "\n".join(script_lines))
+
+    @mcp.tool()
+    def lumerical_mesh_order(
+        session_id: str,
+        order: int = 1,
+    ) -> dict:
+        """Set global mesh order for the simulation.
+
+        Controls how overlapping mesh regions are resolved.
+        Higher values = higher priority.
+
+        Args:
+            session_id: The session ID from lumerical_open
+            order: Global mesh order (default 1)
+
+        Returns:
+            dict with status
+        """
+        session_mgr = SessionManager()
+        return session_mgr.eval(session_id, f'set("mesh order", {order});')
+
     logger.info("Registered simulation lifecycle tools")

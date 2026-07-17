@@ -212,4 +212,83 @@ def register_results_tools(mcp: FastMCP) -> None:
         session_mgr.eval(session_id, "clear(temp_T);")
         return result
 
+    @mcp.tool()
+    def lumerical_get_s_parameters(
+        session_id: str,
+        monitor_name: str = "",
+    ) -> dict:
+        """Get S-parameters from INTERCONNECT simulations.
+
+        Retrieves the full S-parameter matrix.
+
+        Args:
+            session_id: The session ID from lumerical_open
+            monitor_name: Monitor/port name (empty = all ports)
+
+        Returns:
+            dict with S-parameter matrix
+        """
+        session_mgr = SessionManager()
+        code = "temp_spar = getresult("
+        if monitor_name:
+            code += f'"{monitor_name}", '
+        code += '"S matrix");'
+        eval_result = session_mgr.eval(session_id, code)
+        if not eval_result.get("success"):
+            return eval_result
+        result = session_mgr.get_var(session_id, "temp_spar")
+        session_mgr.eval(session_id, "clear(temp_spar);")
+        return result
+
+    @mcp.tool()
+    def lumerical_get_field_components(
+        session_id: str,
+        monitor_name: str,
+    ) -> dict:
+        """List all available field components for a monitor.
+
+        Args:
+            session_id: The session ID from lumerical_open
+            monitor_name: Field/profile monitor name
+
+        Returns:
+            dict with list of available components (Ex, Ey, Ez, Hx, Hy, Hz)
+        """
+        session_mgr = SessionManager()
+        code = (
+            f'temp_comps = getdata("{monitor_name}", "Ex");'
+            f'switch (haskey(temp_comps, "Ex")) {{ case 1: temp_comps_list = '
+            f'["Ex", "Ey", "Ez", "Hx", "Hy", "Hz"]; }}'
+        )
+        session_mgr.eval(session_id, code)
+        result = session_mgr.get_var(session_id, "temp_comps_list")
+        session_mgr.eval(session_id, "clear(temp_comps, temp_comps_list);")
+        return result
+
+    @mcp.tool()
+    def lumerical_get_convergence(
+        session_id: str,
+        monitor_name: str = "",
+    ) -> dict:
+        """Get solver convergence history.
+
+        Returns the auto-shutoff convergence data showing
+        how the field energy decayed during simulation.
+
+        Args:
+            session_id: The session ID from lumerical_open
+            monitor_name: Optional monitor name filter
+
+        Returns:
+            dict with convergence data
+        """
+        session_mgr = SessionManager()
+        code = "temp_conv = getautoshutoffdata;"
+        eval_result = session_mgr.eval(session_id, code)
+        if not eval_result.get("success"):
+            return eval_result
+        result = session_mgr.get_var(session_id, "temp_conv")
+        session_mgr.eval(session_id, "clear(temp_conv);")
+        return result
+
     logger.info("Registered results and analysis tools")

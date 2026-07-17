@@ -170,14 +170,31 @@ def register_docs_tools(mcp: FastMCP) -> None:
 
         examples = {
             "fdtd": {
-                "path": r"D:\ENV\Lumerical\v202\Resources\fdtd-library",
+                "path": r"D:\ENV\Lumerical\ANSYS Inc\v261\Lumerical\Resources\fdtd-library",
                 "files": [],
             },
             "mode": {
-                "path": r"D:\ENV\Lumerical\v202\Resources\mode-library",
+                "path": r"D:\ENV\Lumerical\ANSYS Inc\v261\Lumerical\Resources\mode-library",
+                "files": [],
+            },
+            "device": {
+                "path": r"D:\ENV\Lumerical\ANSYS Inc\v261\Lumerical\Resources\device-library",
+                "files": [],
+            },
+            "interconnect": {
+                "path": r"D:\ENV\Lumerical\ANSYS Inc\v261\Lumerical\Resources\interconnect-library",
                 "files": [],
             },
         }
+
+        # Also check legacy v202 path as fallback
+        for key in list(examples.keys()):
+            if not Path(examples[key]["path"]).exists():
+                legacy_path = examples[key]["path"].replace(
+                    r"ANSYS Inc\v261", "v202"
+                )
+                if Path(legacy_path).exists():
+                    examples[key]["path"] = legacy_path
 
         for key, info in examples.items():
             if category and key != category:

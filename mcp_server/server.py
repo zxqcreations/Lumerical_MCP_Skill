@@ -1,7 +1,8 @@
 """Lumerical MCP Server - Main entry point.
 
 Provides a comprehensive MCP (Model Context Protocol) server for Ansys Lumerical
-photonic simulation tools. Supports FDTD, MODE, DEVICE, and INTERCONNECT products.
+photonic simulation tools. Supports FDTD, MODE, DEVICE, and INTERCONNECT products
+with v261 features: inverse design (lumopt), CML compiler, Intel MPI, AALI AI.
 
 Usage:
     python -m mcp_server.server
@@ -23,6 +24,10 @@ from .tools.solver import register_solver_tools
 from .tools.results import register_results_tools
 from .tools.optimization import register_optimization_tools
 from .tools.docs import register_docs_tools
+from .tools.inverse_design import register_inverse_design_tools
+from .tools.cml_compiler import register_cml_compiler_tools
+from .tools.mpi import register_mpi_tools
+from .tools.ai import register_ai_tools
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,26 +41,47 @@ mcp = FastMCP("Lumerical MCP")
 
 
 def register_all_tools() -> None:
-    """Register all MCP tools."""
+    """Register all MCP tools across 14 tool modules."""
+    # Core session and scripting
     register_session_tools(mcp)
     register_script_tools(mcp)
+
+    # Simulation lifecycle
     register_simulation_tools(mcp)
+
+    # Geometry and materials
     register_geometry_tools(mcp)
     register_material_tools(mcp)
+
+    # Sources, monitors, solvers
     register_source_monitor_tools(mcp)
     register_solver_tools(mcp)
+
+    # Results and analysis
     register_results_tools(mcp)
+
+    # Optimization and sweeps
     register_optimization_tools(mcp)
+
+    # Documentation and discovery
     register_docs_tools(mcp)
-    logger.info("Registered all Lumerical MCP tools")
+
+    # v261 new modules
+    register_inverse_design_tools(mcp)
+    register_cml_compiler_tools(mcp)
+    register_mpi_tools(mcp)
+    register_ai_tools(mcp)
+
+    logger.info("Registered all Lumerical MCP v2.0 tools (14 modules)")
 
 
 def main() -> None:
     """Run the MCP server with stdio transport."""
-    logger.info("Starting Lumerical MCP Server...")
+    logger.info("Starting Lumerical MCP Server v2.0...")
     logger.info(
         "Products: FDTD, MODE, DEVICE, INTERCONNECT | "
-        "Commands: 480+ | Transport: stdio"
+        "Commands: 665+ | Transport: stdio | "
+        "v261: inverse design (lumopt), CML compiler, Intel MPI, AALI AI"
     )
 
     register_all_tools()

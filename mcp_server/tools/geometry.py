@@ -21,10 +21,22 @@ _GEOMETRY_TYPES = {
     "waveguide": "addwaveguide",
     "structure_group": "addstructuregroup",
     "analysis_group": "addanalysisgroup",
+    "assembly_group": "addassemblygroup",
     "surface": "addsurface",
+    "field_region": "addfieldregion",
+    "simulation_region": "addsimulationregion",
     "import": "addimport",
     "user_prop": "adduserprop",
     "custom": "addcustom",
+    # DEVICE-specific
+    "temperature_bc": "addtemperaturebc",
+    "thermal_power_bc": "addthermalpowerbc",
+    "thermal_insulating_bc": "addthermalinsulatingbc",
+    "surface_recombination_bc": "addsurfacerecombinationbc",
+    "convection_bc": "addconvectionbc",
+    "heat_flux_bc": "addheatfluxbc",
+    "radiation_bc": "addradiationbc",
+    "voltage_bc": "addvoltagebc",
 }
 
 

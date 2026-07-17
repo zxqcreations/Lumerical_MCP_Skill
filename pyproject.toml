@@ -1,7 +1,7 @@
 [project]
 name = "lumerical-mcp"
-version = "1.0.0"
-description = "MCP Server for Ansys Lumerical photonic simulation tools (FDTD, MODE, DEVICE, INTERCONNECT)"
+version = "2.0.0"
+description = "MCP Server for Ansys Lumerical v261 photonic simulation tools (FDTD, MODE, DEVICE, INTERCONNECT) — with inverse design, CML compiler, Intel MPI, and AALI AI support"
 requires-python = ">=3.10"
 dependencies = [
     "mcp>=1.0.0",
@@ -11,7 +11,10 @@ license = {text = "MIT"}
 authors = [
     {name = "Lumerical MCP Developer"}
 ]
-keywords = ["lumerical", "fdtd", "photonic", "simulation", "mcp"]
+keywords = [
+    "lumerical", "fdtd", "photonic", "simulation", "mcp",
+    "inverse-design", "lumopt", "cml-compiler", "ansys",
+]
 
 [project.optional-dependencies]
 dev = [
@@ -19,10 +22,22 @@ dev = [
     "pytest-asyncio>=0.23.0",
     "ruff>=0.1.0",
 ]
+opt = [
+    "scipy>=1.10.0",
+]
+ai = [
+    "httpx>=0.25.0",
+]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[project.scripts]
+lumerical-mcp = "mcp_server.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["mcp_server"]
 
 [tool.ruff]
 line-length = 100

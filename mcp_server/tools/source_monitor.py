@@ -15,6 +15,10 @@ _SOURCE_TYPES = {
     "plane": "addplane",
     "imported": "addimportedsource",
     "modesource": "addmodesource",
+    # v261 additions
+    "delta_charge": "adddeltachargesource",
+    "electrical_contact": "addelectricalcontact",
+    "uniform_heat": "adduniformheat",
 }
 
 _MONITOR_TYPES = {
@@ -30,6 +34,13 @@ _MONITOR_TYPES = {
     "bandstructure": "addbandstructuremonitor",
     "port": "addport",
     "effective_index": "addeffectiveindex",
+    # v261 additions
+    "rcwa_field": "addrcwafieldmonitor",
+    "dft": "adddftmonitor",
+    "charge": "addchargemonitor",
+    "heat_flux": "addheatfluxmonitor",
+    "temperature": "addtemperaturemonitor",
+    "jflux": "addjfluxmonitor",
 }
 
 
