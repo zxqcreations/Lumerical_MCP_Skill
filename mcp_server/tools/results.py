@@ -65,29 +65,31 @@ def register_results_tools(mcp: FastMCP) -> None:
         monitor_name: str,
         attribute: str,
     ) -> dict:
-        """Get raw data from a monitor.
+        """Get raw data directly from a monitor or analysis group.
 
-        Retrieves the raw dataset from a monitor object. The data structure
-        depends on the monitor type and geometry.
+        Uses the direct lumapi handle.getdata() API call, which bypasses
+        eval entirely. This is more reliable than eval-based approaches
+        for MODE analysis-mode data (e.g., FDE mode profiles, sweep results).
 
-        Common attributes: 'E', 'H', 'P', 'T', 'index', 'n', 'k', 'epsilon'
+        Common attributes:
+        - FDE modes: 'neff', 'x', 'y', 'z', 'Ex', 'Ey', 'Ez', 'Hx', 'Hy', 'Hz'
+        - INTERCONNECT sweeps: use lumerical_interconnect_get_sweep_data
+        - Field monitors: 'E', 'H', 'P', 'T', 'index', 'n', 'k', 'epsilon'
+
+        Example: lumerical_get_data("lum_1", "FDE::data::mode1", "neff")
 
         Args:
             session_id: The session ID from lumerical_open
-            monitor_name: Name of the monitor
+            monitor_name: Name of the monitor or analysis group
+                (e.g., 'FDE::data::mode1', 'power_monitor')
             attribute: Data attribute to retrieve
+                (e.g., 'neff', 'Ex', 'T')
 
         Returns:
-            dict with data array and metadata
+            dict with data array/value
         """
         session_mgr = SessionManager()
-        code = f'temp_data = getdata("{monitor_name}", "{attribute}");'
-        eval_result = session_mgr.eval(session_id, code)
-        if not eval_result.get("success"):
-            return eval_result
-        result = session_mgr.get_var(session_id, "temp_data")
-        session_mgr.eval(session_id, "clear(temp_data);")
-        return result
+        return session_mgr.get_data(session_id, monitor_name, attribute)
 
     @mcp.tool()
     def lumerical_get_field(

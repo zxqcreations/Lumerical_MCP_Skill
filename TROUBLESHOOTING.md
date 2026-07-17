@@ -141,28 +141,138 @@ INTEROPLIB = "interopapi.dll"
 INTEROPLIB = INTEROPLIBDIR + "/interopapi.dll"
 ```
 
-## 问题 4: MODE 产品中 addfde 命令失败
+## 问题 4: MODE 产品中 addfde/addfdtd 等求解器命令失败 (已修复 ✅)
 
 ### 症状
-在 MODE session 中执行 `addfde;` 及其变体均返回：
+在 MODE session 中通过 `lumerical_eval` 执行 `addfde;` / `addfdtd;` 等命令返回：
 ```
 Script execution failed: 'Failed to evaluate code'
 ```
 
-但 `addrect;`, `switchtolayout;`, `?"hello"` 等命令正常工作。
+但 `addrect;`, `switchtolayout;`, `set(...)` 等命令正常工作。
 
 ### 根因
-Lumerical 2020 R2 的 Python API (`lumapi`) 在 MODE 产品中对 FDE solver 的添加命令存在兼容性问题。`addfde` 命令需要通过 Lumerical GUI 环境或 `.lsf` 脚本文件运行，而 Python interop API 无法正确执行该命令。
+`lumapi.eval()` 在 MODE 产品中对某些求解器添加命令（`addfde`、`addfdtd`、`addeme` 等）的支持不完整。这些命令通过 eval 通道执行会失败，但通过直接 Python API 调用（`handle.addfde()`）完全正常。这不是 Lumerical 本身的限制，而是 eval 通道的问题。
 
-### 解决方案
-使用 Lumerical MODE GUI 直接运行 `.lsf` 脚本文件（File → Run Script），或编写完整的脚本文件通过命令行加载：
+### 解决方案 (v2.1 已修复)
 
-```bash
-# 在 Lumerical MODE GUI 中
-File → Run Script → 选择 .lsf 文件
+MCP 服务器 v2.1+ 在 `session_manager.py` 中实现了 **eval() 自动 fallback 机制**：
+
+1. 首先尝试 `lumapi.eval(code)` 执行脚本
+2. 如果 eval 失败，自动将脚本解析为独立命令，通过直接 Python API (`getattr(handle, command)(*args)`) 逐个执行
+3. 返回每个命令的执行结果，标注 `"method": "direct_api_fallback"`
+
+**受影响的命令**（现在全部通过 fallback 支持）：
+- `addfde` — Finite Difference Eigenmode solver (MODE)
+- `addfdtd` — FDTD solver region (FDTD)
+- `addeme` — Eigenmode Expansion solver (MODE)
+- `addvarfdtd` — Variational FDTD solver (MODE)
+- `adddgdtd` — Discontinuous Galerkin solver
+- `addfeem` — Finite Element Eigenmode solver
+- `addchargesolver` — Charge transport solver (DEVICE)
+- `addheatsolver` — Heat transport solver (DEVICE)
+
+**备选方案**：使用 `lumerical_call` 工具直接调用命令（绕过 eval 通道）：
+```json
+{"session_id": "lum_1", "command": "addfde", "args": "[]"}
+{"session_id": "lum_1", "command": "set", "args": "[\"solver type\", 3]"}
 ```
 
-## 问题 5: 用户级与项目级配置重复
+### 验证
+在 MODE 中运行以下完整流程应全部成功：
+```python
+# 1. lumerical_eval: 创建几何
+addrect; set("name","core"); set("x span",1e-6); set("y span",0.9e-6); set("index",1.97);
+addrect; set("name","sub"); set("x span",4e-6); set("y span",2e-6); set("y",-1e-6); set("index",1.444);
+
+# 2. lumerical_eval: 添加 FDE 求解器 ← 自动 fallback 到直接 API
+addfde; set("solver type",3); set("wavelength",1560e-9); set("number of trial modes",20);
+
+# 3. lumerical_eval: 求解并提取结果
+findmodes;
+neff = getdata("FDE::data::mode1","neff");
+```
+
+## 问题 6: FDE 求解器关键参数设置 (search + solver region)
+
+### 症状
+FDE 只找到泄漏模 (n_eff < n_clad) 或 Gamma 值严重偏离 COMSOL/理论值。
+
+### 根因 (2026-07-18 通过系统排查确认)
+
+**根因 A**: `search=2` (max_index) 在 MODE v261 中行为异常。该搜索方法在 waveguide 结构中不能正确找到导模，返回泄漏模 (n_eff=1.2955 < n_clad=1.444)。应使用 `search=1` (near_n)。
+
+**根因 B**: FDE 求解器默认自动裁剪计算窗口。对于位置不在 y=0 中心的芯层（如 y=[0, 0.9]μm），默认窗口 y=[-0.85, +0.85]μm 会切掉芯层顶部 0.05μm，导致 Γ 偏高 ~14% (0.94 vs 0.83)。
+
+### 解决方案
+
+**1. 始终使用 `search=1` (near_n)**:
+```python
+m.set('search', 1)  # near_n — 正确找到导模
+# 不要使用 m.set('search', 2)  # max_index — v261 中有 bug
+```
+
+**2. 显式设置 FDE 求解器区域**:
+```python
+m.addfde()
+m.set('solver type', 3)
+m.set('wavelength', 1560e-9)
+m.set('number of trial modes', 30)
+m.set('search', 1)          # ← 关键: near_n
+m.set('y', 0.45e-6)         # ← 关键: 芯层 y 中心
+m.set('y span', 2.0e-6)     # ← 关键: 足够覆盖芯层+包层
+m.set('x', 0)               # ← 关键: 芯层 x 中心
+m.set('x span', 2.5e-6)     # ← 关键: 足够覆盖芯层+包层
+```
+
+**3. 信号/泵浦用独立会话**: `findmodes()` 后进入 analysis mode，无法修改材料折射率。分别开两个 MODE 会话求解信号和泵浦波长。
+
+### 验证结果 (2026-07-18)
+
+修复后 Lumerical MODE FDE 与 COMSOL Phase 2 交叉验证：
+
+| 参数 | Lumerical | COMSOL P2 | 偏差 |
+|------|:---:|:---:|:---:|
+| n_eff,s | 1.7267 | 1.7264 | 0.02% |
+| Γ_s | 0.8286 | 0.8251 | 0.42% |
+| n_eff,p | 1.8935 | 1.8934 | 0.01% |
+| Γ_p | 0.9564 | 0.9598 | 0.36% |
+
+**结论: COMSOL Phase 2 结果被独立仿真工具验证，所有参数偏差 <0.5%。**
+
+## 问题 5: 许可证服务器连接失败 (v261)
+
+### 症状
+```
+Could not connect to Ansys license server specified at 
+1055@D:\ENV\ANSYS Inc\Shared Files\Licensing\license_files\ansyslmd.lic
+```
+
+许可证服务器在 `localhost:1055` 正常运行，但 Lumerical 无法连接。
+
+### 根因
+`%APPDATA%\Lumerical\License.ini` 中的 `ansysserver\host` 键指向了错误格式的路径：
+```ini
+ansysserver\host=1055@D:\\ENV\\ANSYS Inc\\Shared Files\\Licensing\\license_files\\ansyslmd.lic
+```
+
+这是 `port@host` 和文件路径的混合体，FlexNet 无法正确解析。应为 `1055@localhost`。
+
+### 解决方案
+编辑 `%APPDATA%\Lumerical\License.ini`：
+```ini
+[license]
+default=user
+domain=0
+type=flex
+flexserver\host=27011@localhost
+ansysserver\host=1055@localhost    # ← 修复此行
+```
+
+### 验证
+```bash
+python -c "import lumapi; m=lumapi.MODE(hide=True); print('OK'); m.close()"
+```
 
 ### 症状
 Claude Code 加载时不确定使用哪个配置，导致连接不稳定。
@@ -182,6 +292,33 @@ cat <project>/.mcp.json
 ```
 
 ---
+
+## 问题 7: INTERCONNECT — eval 不支持且无直接 API fallback
+
+### 症状
+`lumerical_eval('addwaveguide;')` 和 `lumerical_eval('addopticalamplifier;')` 均返回 "Failed to evaluate code"。
+
+### 根因
+INTERCONNECT 的 Python API 与 MODE/FDTD 不同：
+- 没有 `addwaveguide()`、`addopticalamplifier()` 等直接方法
+- 只有通用的 `addelement()` 方法（需指定元素类型字符串）
+- eval 通道同样不支持这些命令
+
+**与 MODE 的关键区别**：MODE 的 `addfde()` 有直接 Python API 方法可 fallback；INTERCONNECT 没有。
+
+### 解决方案
+使用 `lumapi.INTERCONNECT.run('script.lsf')` 执行完整 LSF 脚本文件：
+
+```python
+m = lumapi.INTERCONNECT(hide=True)
+m.run('path/to/circuit_setup.lsf')
+```
+
+**注意事项**：
+1. LSF 脚本中的 `newproject; switchtolayout;` 确保干净启动
+2. 脚本运行后 INTERCONNECT 进入分析模式，下次 `run()` 需先 `switchtodesign`
+3. 旧的 INTERCONNECT 进程可能残留，需 `taskkill /F /IM INTERCONNECT.exe`
+4. 光学放大器等元件的参数设置需在 GUI 中确认属性名
 
 ## 部署检查清单
 

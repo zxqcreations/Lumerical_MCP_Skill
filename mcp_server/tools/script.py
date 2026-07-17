@@ -19,10 +19,18 @@ def register_script_tools(mcp: FastMCP) -> None:
         or sequence of commands using the native Lumerical Scripting Language (LSF).
         This includes commands like addfdtd, addrect, set, get, run, etc.
 
+        **Automatic fallback**: If lumapi.eval() fails (which happens for certain
+        solver commands like addfde, addfdtd, addeme in MODE product), this tool
+        automatically falls back to direct Python API calls. Each command in the
+        script is parsed and executed via getattr(handle, command)(*args).
+
         Use this when:
         - You need to run a sequence of commands together
         - The specific operation isn't available as a dedicated tool
         - You want to script a complete simulation workflow
+
+        Note: For solver addition commands (addfde, addfdtd, addeme, etc.),
+        you can also use lumerical_call for explicit direct API execution.
 
         Example code:
             addfdtd;
@@ -35,7 +43,8 @@ def register_script_tools(mcp: FastMCP) -> None:
             code: Lumerical script code to execute (one or more commands)
 
         Returns:
-            dict with execution status
+            dict with execution status. On eval failure, includes
+            "method": "direct_api_fallback" and per-statement "results".
         """
         session_mgr = SessionManager()
         return session_mgr.eval(session_id, code)
@@ -94,11 +103,18 @@ def register_script_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     def lumerical_call(session_id: str, command: str, args: str = "[]") -> dict:
-        """Call a specific Lumerical script command by name.
+        """Call a specific Lumerical script command by name via direct Python API.
 
-        This provides a structured way to call any command registered in the
-        Lumerical session. All ~480+ commands from the Lumerical scripting language
-        are available.
+        This tool calls commands as direct Python methods on the Lumerical handle
+        (e.g., handle.addfde()), which is more reliable than eval() for certain
+        solver commands in MODE and other products.
+
+        **Use this for solver commands** that may fail with lumerical_eval:
+        - addfde, addfdtd, addeme, addvarfdtd (MODE/FDTD solvers)
+        - addchargesolver, addheatsolver (DEVICE solvers)
+        - addfeem, adddgdtd (other solvers)
+
+        All ~665+ commands from the Lumerical scripting language are available.
 
         Commands include things like:
         - addfdtd, addrect, addcircle, addsphere (geometry)

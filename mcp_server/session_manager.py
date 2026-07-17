@@ -160,6 +160,50 @@ def get_intel_mpi_path() -> Optional[str]:
     return None
 
 
+def cleanup_interconnect_processes() -> dict:
+    """Kill zombie INTERCONNECT processes that may block new sessions.
+
+    INTERCONNECT.exe processes can persist after Python sessions end,
+    preventing new connections. Call this before opening an INTERCONNECT
+    session to ensure a clean state.
+
+    Returns:
+        dict with cleanup status
+    """
+    import subprocess
+
+    killed = 0
+    try:
+        if os.name == "nt":
+            result = subprocess.run(
+                ["taskkill", "/F", "/IM", "INTERCONNECT.exe"],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0:
+                # Count killed processes from output
+                for line in result.stdout.splitlines():
+                    if "SUCCESS" in line:
+                        killed += 1
+        else:
+            result = subprocess.run(
+                ["pkill", "-f", "INTERCONNECT"],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0:
+                killed = 1
+    except FileNotFoundError:
+        # taskkill/pkill not available — nothing to clean
+        pass
+    except Exception as e:
+        logger.warning(f"Process cleanup failed: {e}")
+
+    if killed > 0:
+        logger.info(f"Cleaned up {killed} zombie INTERCONNECT process(es)")
+    return {"success": True, "killed": killed}
+
+
 class SessionInfo:
     """Information about an active Lumerical session."""
 
@@ -238,6 +282,7 @@ class SessionManager:
         keep_cad_opened: bool = False,
         script: Optional[str] = None,
         project: Optional[str] = None,
+        cwd: Optional[str] = None,
     ) -> dict:
         """Open a new Lumerical session.
 
@@ -251,6 +296,8 @@ class SessionManager:
             keep_cad_opened: If True, CAD remains open after Python exits
             script: Path to script file (.lsf or .py) to execute on startup
             project: Path to project file (.fsp, .lms, etc.) to load on startup
+            cwd: Working directory for the session (file I/O, script exports).
+                Defaults to the current working directory.
 
         Returns:
             dict with session info or error
@@ -364,6 +411,17 @@ class SessionManager:
             info.api_version = lm.getApiVersion(info.handle.handle)
         except Exception:
             pass
+
+        # Set working directory for file I/O (e.g., fopen, exportcsvresults)
+        work_dir = cwd or os.getcwd()
+        try:
+            normalized = str(Path(work_dir).resolve())
+            info.handle.eval(f'cd("{normalized}");')
+            logger.info(f"Session {session_id} working directory: {normalized}")
+        except Exception:
+            logger.warning(
+                f"Could not set working directory for session {session_id}"
+            )
 
         logger.info(f"Opened {product} session: {session_id}")
 
@@ -516,6 +574,11 @@ class SessionManager:
     def eval(self, session_id: str, code: str) -> dict:
         """Execute Lumerical script code in a session.
 
+        First attempts lumapi.eval(). On failure, falls back to parsing
+        individual commands and executing them via direct Python API calls
+        (getattr(handle, command)(*args)). This supports commands that
+        eval() cannot handle in some products (e.g., addfde, addfdtd in MODE).
+
         Args:
             session_id: Session ID
             code: Lumerical script code to execute
@@ -526,12 +589,179 @@ class SessionManager:
         try:
             info = self._verify_session(session_id)
             with info.lock:
-                info.handle.eval(code)
-            return {"success": True, "message": "Script executed successfully."}
+                try:
+                    info.handle.eval(code)
+                    return {"success": True, "message": "Script executed successfully."}
+                except Exception as eval_error:
+                    # Fallback: parse and execute via direct API
+                    logger.warning(
+                        f"eval() failed for session {session_id}: {eval_error}. "
+                        f"Attempting direct API fallback..."
+                    )
+                    return self._eval_direct_fallback(info, code)
         except ValueError as e:
             return {"success": False, "error": str(e)}
         except Exception as e:
             return {"success": False, "error": f"Script execution failed: {e}"}
+
+    def _eval_direct_fallback(self, info: SessionInfo, code: str) -> dict:
+        """Fallback: parse LSF code and execute via direct Python API calls.
+
+        Some Lumerical commands (e.g., addfde, addfdtd, addeme in MODE product)
+        cannot be executed via lumapi.eval() but work fine as direct method
+        calls on the handle object (e.g., handle.addfde()).
+
+        Args:
+            info: SessionInfo for the active session
+            code: Lumerical script code to execute
+
+        Returns:
+            dict with per-statement results
+        """
+        statements = self._parse_lsf(code)
+        if not statements:
+            return {
+                "success": False,
+                "error": (
+                    "eval() failed and fallback parsing found no parseable "
+                    "statements. Try using lumerical_call for individual commands."
+                ),
+            }
+
+        results = []
+        all_ok = True
+
+        for stmt_text, cmd_name, args in statements:
+            try:
+                method = getattr(info.handle, cmd_name, None)
+                if method is None:
+                    all_ok = False
+                    results.append({
+                        "statement": stmt_text,
+                        "success": False,
+                        "error": f"Unknown command: {cmd_name}",
+                    })
+                    continue
+
+                result = method(*args)
+                results.append({
+                    "statement": stmt_text,
+                    "success": True,
+                    "result": str(result) if result is not None else None,
+                })
+            except Exception as e:
+                all_ok = False
+                results.append({
+                    "statement": stmt_text,
+                    "success": False,
+                    "error": str(e),
+                })
+
+        success_count = sum(1 for r in results if r.get("success"))
+        return {
+            "success": all_ok,
+            "message": (
+                f"Direct API fallback: {success_count}/{len(results)} "
+                f"command(s) succeeded"
+            ),
+            "method": "direct_api_fallback",
+            "results": results,
+        }
+
+    @staticmethod
+    def _parse_lsf(code: str) -> list:
+        """Parse Lumerical Script File code into (statement, command, args) tuples.
+
+        Handles:
+            - Simple commands: addfde; addfdtd;
+            - Commands with args: set("name", "core");
+            - Mixed numeric/string/identifier args: set("x span", 1e-6);
+            - Multi-line scripts
+
+        Args:
+            code: Lumerical script code string
+
+        Returns:
+            List of (statement_text, command_name, args_list) tuples
+        """
+        import ast
+        import re
+
+        # Split by semicolons, respecting quoted strings
+        statements = re.split(r';(?=(?:[^"]*"[^"]*")*[^\'"]*$)', code)
+
+        parsed = []
+        for stmt in statements:
+            stmt = stmt.strip()
+            if not stmt:
+                continue
+
+            # Match: command_name or command_name(arg1, arg2, ...)
+            # DOTALL handles args that may span lines
+            match = re.match(r'(\w+)\s*(?:\((.*)\))?', stmt, re.DOTALL)
+            if not match:
+                continue
+
+            cmd_name = match.group(1)
+            args_str = match.group(2)
+
+            args = []
+            if args_str and args_str.strip():
+                arg_parts = SessionManager._split_lsf_args(args_str)
+                for part in arg_parts:
+                    part = part.strip()
+                    if not part:
+                        continue
+                    try:
+                        val = ast.literal_eval(part)
+                    except (ValueError, SyntaxError):
+                        # Identifier or expression — keep as string
+                        val = part
+                    args.append(val)
+
+            parsed.append((stmt, cmd_name, args))
+
+        return parsed
+
+    @staticmethod
+    def _split_lsf_args(args_str: str) -> list:
+        """Split argument string by commas, respecting quoted strings and nested parens.
+
+        Args:
+            args_str: The content between parentheses of a command call
+
+        Returns:
+            List of argument strings
+        """
+        parts = []
+        current = []
+        depth = 0
+        in_single = False
+        in_double = False
+
+        for ch in args_str:
+            if ch == "'" and not in_double:
+                in_single = not in_single
+                current.append(ch)
+            elif ch == '"' and not in_single:
+                in_double = not in_double
+                current.append(ch)
+            elif ch == '(' and not in_single and not in_double:
+                depth += 1
+                current.append(ch)
+            elif ch == ')' and not in_single and not in_double:
+                depth -= 1
+                current.append(ch)
+            elif ch == ',' and depth == 0 and not in_single and not in_double:
+                parts.append(''.join(current))
+                current = []
+            else:
+                current.append(ch)
+
+        if current:
+            parts.append(''.join(current))
+
+        return parts
 
     def get_var(self, session_id: str, var_name: str) -> dict:
         """Get a variable value from a session.
@@ -614,6 +844,108 @@ class SessionManager:
             return {"success": False, "error": str(e)}
         except Exception as e:
             return {"success": False, "error": f"Command '{command}' failed: {e}"}
+
+    def run_script(self, session_id: str, script_path: str) -> dict:
+        """Execute a .lsf script file in a session via handle.run().
+
+        This is the recommended approach for INTERCONNECT workflows where
+        element-level direct API methods are not available. The script
+        file is executed natively by the Lumerical engine.
+
+        The LumApiError "Analysis Mode" is treated as success — it means
+        the script completed and the session entered analysis mode.
+
+        Args:
+            session_id: Session ID
+            script_path: Absolute path to .lsf script file
+
+        Returns:
+            dict with execution result
+        """
+        try:
+            info = self._verify_session(session_id)
+            path = Path(script_path)
+            if not path.exists():
+                return {
+                    "success": False,
+                    "error": f"Script file not found: {script_path}",
+                }
+            if path.suffix.lower() not in (".lsf", ".lsfx"):
+                return {
+                    "success": False,
+                    "error": (
+                        f"Expected .lsf script file, got: {path.suffix}. "
+                        f"Use lumerical_load for project files."
+                    ),
+                }
+
+            with info.lock:
+                try:
+                    info.handle.run(str(path))
+                    return {
+                        "success": True,
+                        "message": f"Script executed: {script_path}",
+                    }
+                except Exception as run_error:
+                    err_msg = str(run_error)
+                    # "Analysis Mode" error = script completed successfully
+                    if "Analysis Mode" in err_msg or "analysis mode" in err_msg.lower():
+                        return {
+                            "success": True,
+                            "message": (
+                                f"Script completed (session entered analysis mode): "
+                                f"{script_path}"
+                            ),
+                            "note": "Session is now in analysis mode.",
+                        }
+                    raise
+        except ValueError as e:
+            return {"success": False, "error": str(e)}
+        except Exception as e:
+            return {"success": False, "error": f"Script execution failed: {e}"}
+
+    def get_data(self, session_id: str, dataset: str, attribute: str) -> dict:
+        """Get data directly via handle.getdata() — bypasses eval entirely.
+
+        Unlike lumerical_eval('x = getdata(...)'), this calls the lumapi
+        handle.getdata() method directly and returns the result. No
+        intermediate variable assignment is needed.
+
+        Args:
+            session_id: Session ID
+            dataset: Dataset name (e.g., 'FDE::data::mode1')
+            attribute: Data attribute (e.g., 'neff', 'x', 'y')
+
+        Returns:
+            dict with data array/value
+        """
+        try:
+            info = self._verify_session(session_id)
+            with info.lock:
+                # Try direct handle.getdata() first
+                try:
+                    result = info.handle.getdata(dataset, attribute)
+                except AttributeError:
+                    # Fallback: some lumapi versions may not expose getdata
+                    # as a direct method — use eval
+                    code = f'_mcp_data = getdata("{dataset}", "{attribute}");'
+                    info.handle.eval(code)
+                    result = info.handle.getv("_mcp_data")
+                    info.handle.eval("clear(_mcp_data);")
+
+            return {
+                "success": True,
+                "dataset": dataset,
+                "attribute": attribute,
+                "data": result,
+            }
+        except ValueError as e:
+            return {"success": False, "error": str(e)}
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Failed to get data '{dataset}/{attribute}': {e}",
+            }
 
     def load(self, session_id: str, filepath: str) -> dict:
         """Load a project file into the session.

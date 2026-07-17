@@ -26,6 +26,7 @@ from .tools.optimization import register_optimization_tools
 from .tools.docs import register_docs_tools
 from .tools.inverse_design import register_inverse_design_tools
 from .tools.cml_compiler import register_cml_compiler_tools
+from .tools.interconnect import register_interconnect_tools
 from .tools.mpi import register_mpi_tools
 from .tools.ai import register_ai_tools
 
@@ -69,19 +70,20 @@ def register_all_tools() -> None:
     # v261 new modules
     register_inverse_design_tools(mcp)
     register_cml_compiler_tools(mcp)
+    register_interconnect_tools(mcp)
     register_mpi_tools(mcp)
     register_ai_tools(mcp)
 
-    logger.info("Registered all Lumerical MCP v2.0 tools (14 modules)")
+    logger.info("Registered all Lumerical MCP v2.2 tools (15 modules)")
 
 
 def main() -> None:
     """Run the MCP server with stdio transport."""
-    logger.info("Starting Lumerical MCP Server v2.0...")
+    logger.info("Starting Lumerical MCP Server v2.2...")
     logger.info(
         "Products: FDTD, MODE, DEVICE, INTERCONNECT | "
         "Commands: 665+ | Transport: stdio | "
-        "v261: inverse design (lumopt), CML compiler, Intel MPI, AALI AI"
+        "v2.2: eval fallback, INTERCONNECT scripts, FDE smart defaults, direct getdata"
     )
 
     register_all_tools()

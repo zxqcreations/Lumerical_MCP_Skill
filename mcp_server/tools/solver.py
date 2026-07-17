@@ -38,6 +38,8 @@ def register_solver_tools(mcp: FastMCP) -> None:
         session_id: str,
         solver_type: str,
         properties: str = "{}",
+        core_y_center: float = 0,
+        core_y_span: float = 0,
     ) -> dict:
         """Add a solver region to the simulation.
 
@@ -51,6 +53,11 @@ def register_solver_tools(mcp: FastMCP) -> None:
         - 'heat': Heat transport solver - DEVICE
         - 'feem': FEEM solver (finite element eigenmode)
 
+        **FDE solver smart defaults (v2.2)**:
+        - Auto-sets search=1 (near_n) — search=2 (max_index) is BUGGY in v261
+        - Auto-computes solver region from core_y_center/core_y_span hints
+        - Note: separate sessions needed for signal vs pump wavelengths
+
         Common FDTD properties:
         - dimension (1=2D, 2=3D), x, y, z, x_span, y_span, z_span
         - simulation_time, auto_shutoff_min, auto_shutoff_max
@@ -58,13 +65,22 @@ def register_solver_tools(mcp: FastMCP) -> None:
         - boundary_conditions (x_min_bc, x_max_bc, etc.)
         - dt_stability_factor
 
+        Common FDE properties:
+        - solver_type (2=2D X-slice, 3=2D Y-slice)
+        - wavelength, number_of_trial_modes
+        - search (1=near_n recommended; 2=max_index BUGGY in v261)
+
         Args:
             session_id: The session ID from lumerical_open
             solver_type: Type of solver to add
             properties: JSON object of solver properties
+            core_y_center: (FDE only) Core center y-position in meters.
+                Used to auto-compute solver region. Default 0 (skip).
+            core_y_span: (FDE only) Core y-span in meters.
+                Used to auto-compute solver region. Default 0 (skip).
 
         Returns:
-            dict with status
+            dict with status and any warnings/notes
         """
         import json
 
@@ -74,6 +90,51 @@ def register_solver_tools(mcp: FastMCP) -> None:
             return {"success": False, "error": f"Invalid JSON: {properties}"}
 
         cmd = _SOLVER_TYPES.get(solver_type, solver_type)
+
+        warnings = []
+
+        # --- Smart FDE defaults (v2.2) ---
+        if solver_type == "fde" or cmd == "addfde":
+            # search=1 (near_n) is the correct default; search=2 is buggy in v261
+            if "search" not in props:
+                props["search"] = 1
+                warnings.append(
+                    "Auto-set search=1 (near_n). "
+                    "search=2 (max_index) is buggy in v261 MODE — "
+                    "it returns leaky modes (n_eff < n_clad) instead of guided modes."
+                )
+            elif props["search"] == 2:
+                warnings.append(
+                    "WARNING: search=2 (max_index) is buggy in v261 MODE. "
+                    "It may return leaky modes instead of guided modes. "
+                    "Use search=1 (near_n) for reliable results."
+                )
+
+            # Auto-compute solver region from geometry hints
+            if core_y_center and core_y_span:
+                margin = max(core_y_span * 0.8, 0.5e-6)
+                if "y" not in props:
+                    props["y"] = core_y_center
+                if "y span" not in props:
+                    props["y span"] = core_y_span + 2 * margin
+                if "x" not in props:
+                    props["x"] = 0
+                if "x span" not in props:
+                    props["x span"] = core_y_span + 2 * margin
+                warnings.append(
+                    f"Auto-computed solver region from geometry hints "
+                    f"(core_y={core_y_center:.2e}, core_span={core_y_span:.2e}). "
+                    f"Region: x=[-{props['x span']/2:.2e}, {props['x span']/2:.2e}], "
+                    f"y=[{props['y']-props['y span']/2:.2e}, "
+                    f"{props['y']+props['y span']/2:.2e}]."
+                )
+
+            # Warn about multi-wavelength needing separate sessions
+            warnings.append(
+                "Note: findmodes() enters analysis mode. "
+                "Use separate MODE sessions for signal vs pump wavelengths — "
+                "material refractive index cannot be changed after findmodes()."
+            )
 
         session_mgr = SessionManager()
         script_lines = [f"{cmd};"]
@@ -86,7 +147,10 @@ def register_solver_tools(mcp: FastMCP) -> None:
             else:
                 script_lines.append(f'set("{key}", {value});')
 
-        return session_mgr.eval(session_id, "\n".join(script_lines))
+        result = session_mgr.eval(session_id, "\n".join(script_lines))
+        if warnings:
+            result["warnings"] = warnings
+        return result
 
     @mcp.tool()
     def lumerical_add_mesh(
